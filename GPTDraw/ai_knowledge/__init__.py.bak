@@ -1,0 +1,90 @@
+"""GPTDraw 的 AI 知识库：插件加载时注册，供 RAG 检索。"""
+
+from gsuid_core.ai_core.configs.ai_config import ai_config
+
+if ai_config.get_config("enable").data:
+    from gsuid_core.ai_core.models import KnowledgePoint
+    from gsuid_core.ai_core.register import ai_entity
+
+    _PLUGIN = "GPTDraw"
+
+    def _kp(kp_id: str, title: str, content: str, tags: list[str]) -> None:
+        ai_entity(
+            KnowledgePoint(
+                id=kp_id,
+                plugin=_PLUGIN,
+                title=title,
+                content=content,
+                tags=tags,
+            )
+        )
+
+    def register_knowledge() -> None:
+        _kp(
+            "gptdraw_overview",
+            "GPTDraw · GPT 生图",
+            """# GPTDraw · GPT 生图
+
+GPTDraw 是 GsCore 的 GPT 生图插件，统一走 New API 的 `/images/generations` 接口，模型固定为 `gpt-image-2.5-ext`。命令前缀 `gpt` / `GPT`。
+
+## 核心概念
+- **个人密钥**：每个用户绑定自己的 New API 密钥，费用记在自己名下；同一用户可绑多把并切换当前使用项。密钥在数据库里只存 Fernet 密文。
+- **会话授权**：绑定者可把密钥授权给当前群，群成员直接生图、扣授权人的额度。
+- **个人授权**：绑定者可授权某个人私聊使用自己的密钥，可随时收回。
+- **参考图改图**：生图时附带一张图（或引用一张图），会作为参考图走改图。
+- **预设**：本地预设存数据库，可增删；远程提示词库定时同步到内存。
+- **网页管理页**：密钥、预设、会话授权、个人授权都能在 WebConsole 增删改查。
+
+## 规则
+- 没有绑定密钥或被授权时不能生图；不要替用户编造「已生成」。
+- 密钥是敏感信息，聊天里不要回显；绑定后建议撤回带密钥的消息。
+- `gpt全部密钥` 只有主人、且仅私聊可用，普通用户不能查。
+- 余额查询、消耗排行、总余额不在本插件，继续用 NewAPI 看板插件。
+- 模型与接口地址由部署者配置；生图失败时按返回的 New API 错误说明，不要反复重试扣费。""",
+            [
+                "GPTDraw",
+                "GPT生图",
+                "gpt",
+                "生图",
+                "画图",
+                "New API",
+                "密钥",
+                "授权",
+                "参考图",
+            ],
+        )
+        _kp(
+            "gptdraw_commands",
+            "GPTDraw 命令速查（前缀 gpt）",
+            """# GPTDraw 命令速查（前缀 gpt / GPT）
+
+## 密钥
+`gpt设置密钥 <密钥>`、`gpt我的密钥`、`gpt删除密钥 [序号|全部]`、`gpt全部密钥`（主人，仅私聊）
+
+## 生图
+`gpt生图 <提示词> [参数]`、`gpt画图 ...`、`gptbnn ...`
+附带一张图：作为参考图改图。
+参数：`1:1` / `16:9` / `2k` 可直接写在提示词里；也支持 `--size`、`--resolution`、`--version`、`--quality`、`--images`。
+默认画幅 `1:1`、分辨率 `1k`、版本 `flare`；版本可选 `flare` / `sunburst`。
+
+## 预设
+`gpt预设列表`、`gpt预设 <名称> [额外提示词]`、`gpt预设添加 <名称> <提示词>`、`gpt预设删除 <名称>`（主人）、`gpt重载预设库`
+
+## 授权
+`gpt授权本群开启` / `gpt授权本群关闭`、`gpt授权 @某人`、`gpt取消授权 @某人` / `gpt取消授权 本群`、`gpt授权状态`
+
+## 其他
+`gpt帮助` / `gpt菜单` / `gpt help`、`gpt重载插件`（主人）""",
+            [
+                "GPTDraw",
+                "命令",
+                "gpt生图",
+                "gpt预设",
+                "设置密钥",
+                "授权本群",
+                "参考图",
+                "画幅",
+            ],
+        )
+
+    register_knowledge()

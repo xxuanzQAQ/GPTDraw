@@ -1,0 +1,10 @@
+[project]
+name = "gsuid-plugin-gptdraw"
+version = "1.1.1"
+description = "GPT 生图插件：自选模型、New API 计费生图、按人绑定密钥、群/个人授权、GIF、预设与提示词库同步"
+requires-python = ">=3.11,<4.0"
+dependencies = []
+
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"

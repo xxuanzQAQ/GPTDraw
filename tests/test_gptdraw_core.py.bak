@@ -1,0 +1,153 @@
+"""GPTDraw 纯逻辑定向测试：参数解析、响应解析与预设条目。"""
+
+from __future__ import annotations
+
+from GPTDraw.GPTDraw.gpt_core.api import extract_urls
+from GPTDraw.GPTDraw.gpt_core.common import ParamError, mask_key, validate_preset_name, normalize_preset_name
+from GPTDraw.GPTDraw.gpt_core.params import (
+    build_request,
+    parse_options,
+    is_image_size_error,
+    apply_inline_options,
+    image_size_candidates,
+)
+from GPTDraw.GPTDraw.gpt_core.presets import PresetEntry, combine_prompt, _parse_api_item
+from GPTDraw.GPTDraw.gpt_core.settings import Settings
+
+
+def make_settings() -> Settings:
+    return Settings(
+        api_base_url="http://localhost:3000/v1",
+        request_timeout=300,
+        max_concurrent=2,
+        allow_private_reference_urls=True,
+        billing_request_path="/images/generations",
+        image_request_mode="images_generations",
+        image_async_enabled=True,
+        image_task_request_path="/v1/images/generations/{task_id}",
+        poll_interval=8,
+        poll_timeout=360,
+        default_image_size="1:1",
+        default_image_size_format="ratio",
+        default_image_resolution="1k",
+        default_image_version="flare",
+        preset_api_base_url="",
+        preset_api_timeout=8,
+        preset_api_refresh_interval=60,
+    )
+
+
+def test_parse_options_and_inline_size() -> None:
+    settings = make_settings()
+    options, prompt = parse_options("一只橘猫 --quality high --size=16:9 --n 2")
+    assert options == {"quality": "high", "size": "16:9", "n": "2"}
+    assert prompt == "一只橘猫"
+
+    options, prompt = apply_inline_options({}, "赛博朋克城市 2k --size 3:2", settings)
+    assert prompt == "赛博朋克城市"
+    assert options["size"] == "3:2"
+    assert options["resolution"] == "2k"
+
+
+def test_build_request_sizes_and_billing() -> None:
+    settings = make_settings()
+    request = build_request({"resolution": "2k", "size": "16:9"}, "一只猫", "一只猫", settings)
+    assert request.payload["model"] == "gpt-image-2.5-ext-2k"
+    assert request.payload["size"] == "16:9"
+    assert request.payload["resolution"] == "2K"
+    assert request.payload["version"] == "flare"
+    assert "n" not in request.payload
+    assert request.billing_units == 2
+    assert request.size_values == ["16:9", "auto"]
+
+    default = build_request({}, "一只猫", "一只猫", settings)
+    assert default.payload["model"] == "gpt-image-2.5-ext"
+    assert default.payload["size"] == "1:1"
+    assert default.payload["resolution"] == "1K"
+    assert default.billing_units == 1
+
+    four = build_request({"resolution": "4k"}, "一只猫", "一只猫", settings)
+    assert four.payload["model"] == "gpt-image-2.5-ext-4k"
+    assert four.payload["resolution"] == "4K"
+    assert four.billing_units == 3
+
+
+def test_version_and_size_rules() -> None:
+    settings = make_settings()
+    sunburst = build_request({"version": "sunburst"}, "一只猫", "一只猫", settings)
+    assert sunburst.payload["version"] == "sunburst"
+    auto = build_request({"size": "auto"}, "一只猫", "一只猫", settings)
+    assert auto.payload["size"] == "auto"
+    for options in ({"version": "v2"}, {"size": "2:1"}, {"size": "3072x1024"}):
+        try:
+            build_request(options, "一只猫", "一只猫", settings)
+        except ParamError:
+            continue
+        raise AssertionError(f"{options} 应该被拒绝")
+
+
+def test_n_only_accepts_one() -> None:
+    settings = make_settings()
+    one = build_request({"n": "1"}, "一只猫", "一只猫", settings)
+    assert one.payload["n"] == 1
+    try:
+        build_request({"n": "2"}, "一只猫", "一只猫", settings)
+    except ParamError as exc:
+        assert "只能填 1" in str(exc)
+    else:
+        raise AssertionError("n=2 应该被拒绝")
+
+
+def test_model_follows_resolution() -> None:
+    settings = make_settings()
+    matched = build_request({"resolution": "2k", "model": "gpt-image-2.5-ext-2k"}, "cat", "cat", settings)
+    assert matched.payload["model"] == "gpt-image-2.5-ext-2k"
+    for model in ("dall-e-3", "gpt-image-2.5-ext-2k"):
+        try:
+            build_request({"model": model}, "cat", "cat", settings)
+        except ParamError as exc:
+            assert "模型由分辨率决定" in str(exc)
+        else:
+            raise AssertionError(f"{model} 与 1k 不匹配，应该报参数错误")
+
+
+def test_size_helpers() -> None:
+    assert image_size_candidates("16:9", "2k")["pixels"] == "2048x1152"
+    assert image_size_candidates("2048x2048", None)["ratio"] == "1:1"
+    assert is_image_size_error("Invalid size: 1536x864")
+    assert not is_image_size_error("invalid api key")
+
+
+def test_extract_urls() -> None:
+    urls = extract_urls(
+        {
+            "data": [
+                {"url": "https://cdn.example.com/a.png"},
+                {"b64_json": "QUJD", "mime_type": "image/png"},
+            ]
+        }
+    )
+    assert urls == ["https://cdn.example.com/a.png", "data:image/png;base64,QUJD"]
+    assert extract_urls({"task_id": "t-1", "status": "queued"}) == []
+
+
+def test_preset_entry_and_prompt() -> None:
+    entry = _parse_api_item({"name": " 小猫 ", "prompt": "a cat", "entry_type": "preset", "reply": "喵"})
+    assert entry is not None
+    assert (entry.name, entry.source, entry.reply) == ("小猫", "remote", "喵")
+    assert _parse_api_item({"name": "主题", "prompt": "x", "entry_type": "prompt_share"}) is None
+    preset = PresetEntry(name="小猫", prompt="a cat", reply="", image="", source="local")
+    assert combine_prompt(preset, "戴帽子") == "a cat 戴帽子"
+    assert combine_prompt(preset, "") == "a cat"
+
+
+def test_name_and_mask() -> None:
+    assert normalize_preset_name("/#小猫") == "小猫"
+    assert validate_preset_name("小猫-1") == "小猫-1"
+    try:
+        validate_preset_name("有 空格")
+    except ParamError:
+        pass
+    else:
+        raise AssertionError("带空格的预设名应该报错")
+    assert mask_key("sk-12345678") == "****5678"
